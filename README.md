@@ -15,4 +15,4 @@
 4. Starting with Pytorch
 - just started with it, about 20% done
 
-This was all about 5 weeks of work, our project is about 6-8 weeks long, i am a little behind but i will definitely catch up
+This was all about 5 weeks of work, our project is about 6-8 weeks long, i am a little behind but will definitely catch up
