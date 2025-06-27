@@ -7,7 +7,7 @@
 - numpy = https://github.com/KeithGalli/NumPy, pandas = https://github.com/KeithGalli/pandas (notes were already there, i just imported them in jupyter on my pc)
 
 
-3. Starting with Neural networks (mostly theorotical)
+3. Starting with Neural networks (mostly theorotical) = https://www.youtube.com/watch?v=Gv9_4yMHFhI&list=PLblh5JKOoLUICTaGLRoHQDuF_7q2GfuJF
 - Learnt about backpropogation, weights, biases, linear regression, gradient descent, loss function
 - predicting a squiggle/graph to fit the observed values through a neural network
 - learnt about neural networks with multiple inputs and outputs, argmax, softmax, cross entropy etc
