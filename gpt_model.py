@@ -12,7 +12,7 @@ losses_eval_iterations = 200
 learning_rate = 1e-3
 
 # recieving input
-with open('input2.txt', 'r', encoding='utf-8') as open_text:
+with open('input_conversations.txt', 'r', encoding='utf-8') as open_text:
     input_text = open_text.read()
 
 characters_list = sorted(list(set(input_text)))
