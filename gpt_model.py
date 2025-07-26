@@ -3,16 +3,16 @@ import torch.nn as nn
 from torch.nn import functional as F
 torch.manual_seed(1337)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-batch_size = 4
-token_size = 8
+batch_size = 64
+token_size = 16
 embeddings_count = 32
-max_iterations = 3000
-evaluation_interval = 300
+max_iterations = 8000
+evaluation_interval = 500
 losses_eval_iterations = 200
 learning_rate = 1e-3
 
 # recieving input
-with open('input.txt', 'r', encoding='utf-8') as open_text:
+with open('input2.txt', 'r', encoding='utf-8') as open_text:
     input_text = open_text.read()
 
 characters_list = sorted(list(set(input_text)))
@@ -53,6 +53,63 @@ def get_batch(split):
     return input_batch, target_batch
 
 
+class MultiHeadAttention(nn.Module):
+
+    def __init__(self, heads_count, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size)
+                                   for _ in range(heads_count)])
+
+    def forward(self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        return out
+
+
+class Head(nn.Module):
+
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(embeddings_count, head_size, bias=False)
+        self.query = nn.Linear(embeddings_count, head_size, bias=False)
+        self.value = nn.Linear(embeddings_count, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(
+            torch.ones(token_size, token_size)))
+
+    def forward(self, x):
+        # input of size (batch, time-step, channels)
+        # output of size (batch, time-step, head size)
+        B, T, C = x.shape
+        key_matrix = self.key(x)   # (B,T,hs)
+        query_matrix = self.query(x)  # (B,T,hs)
+        # compute attention scores ("affinities")
+        # (B, T, hs) @ (B, hs, T) -> (B, T, T)
+        affinity_matrix = query_matrix @ key_matrix.transpose(-2, -1) * \
+            key_matrix.shape[-1]**-0.5
+        affinity_matrix = affinity_matrix.masked_fill(
+            self.tril[:T, :T] == 0, float('-inf'))  # (B, T, T)
+        affinity_matrix = F.softmax(affinity_matrix, dim=-1)  # (B, T, T)
+        # perform the weighted aggregation of the values
+        value_matrix = self.value(x)  # (B,T,hs)
+        # (B, T, T) @ (B, T, hs) -> (B, T, hs)
+        out = affinity_matrix @ value_matrix
+        return out
+
+
+class FeedFoward(nn.Module):
+
+    def __init__(self, n_embd):
+        super().__init__()
+        self.feed_fwrd = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd),
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd),
+            # to add an activation function (relu) that is non linear for better training and optimization
+        )
+
+    def forward(self, x):
+        return self.feed_fwrd(x)
+
+
 class GptModel(nn.Module):
 
     def __init__(self):
@@ -63,18 +120,26 @@ class GptModel(nn.Module):
         # makes 32 embeddings for each token
         self.position_embedding_table = nn.Embedding(
             token_size, embeddings_count)
-        # Linear layer to convert token embeddings (32) [inputs] to vocab_size (65)(output)
+        # # Linear layer to convert token embeddings (32) [inputs] to vocab_size (65)(output)
+        self.self_attention_head = MultiHeadAttention(
+            # head_count = 4, head dimensions = 8 (size of key query value matrix)
+            4, embeddings_count//4)
         self.emb_convert = nn.Linear(embeddings_count, chars_num)
+        self.feed_forward = FeedFoward(embeddings_count)
 
     def forward(self, index, targets=None):
         # each token in each batch contains 65 logits, which when trained, predict the possibility of next character Ex- [0.04,0.01,0.45,0.01,.....] => here 3rd character has 45% prob of being next, 1st character has 4% prob of being next
+        B, T = index.shape
         token_embeddings = self.token_embedding_table(index)
-        # token embeddings = (B,T,32)
+        # token embeddings = (B,T, embeddings count)
         position_embeddings = self.position_embedding_table(
-            torch.arange(token_size, device=device))
+            torch.arange(T, device='cuda'))  # (T, embeddings count)
         # position_embeddings = (T, 32)
         net_token = token_embeddings + position_embeddings
-        predictions = self.emb_convert(net_token)
+        net_token = self.self_attention_head(net_token)
+        net_token = self.feed_forward(net_token)
+        predictions = self.emb_convert(
+            net_token)
         # predictions = (B,T, 65 = chars_num)
         if targets is None:
             loss = None
@@ -90,7 +155,9 @@ class GptModel(nn.Module):
 
     def generate_new_tokens(self, input_tokens, max_new_tokens):
         for _ in range(max_new_tokens):
-            logits, loss_substitute = self.forward(input_tokens)
+            # goes from -token size to -1, so that position embeddng table doesnt go out of scope
+            input_tokens_cropped = input_tokens[:, -token_size:]
+            logits, loss_substitute = self.forward(input_tokens_cropped)
             logits = logits[:, -1, :]  # becomes (B, C), takes the last
             probs = F.softmax(logits, dim=-1)
             # (B, 1), makes the highest probability number as the only token in each batch
