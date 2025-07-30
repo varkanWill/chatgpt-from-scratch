@@ -16,7 +16,8 @@
 
 
 4. Starting with Pytorch
-- just started with it, about 20% done
+- learnt about tensor operations and matrices, pytorch nn modules and pytorch model optimizers
 
-
-This was all about 5 weeks of work, our project is about 6-8 weeks long, i am a little behind but will definitely catch up
+5. The Final Project
+- trying to make a decoder only transformer based LLM that can be trained using large set of data files
+- 
