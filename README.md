@@ -20,6 +20,6 @@
 
 
 5. The Final Project - https://www.youtube.com/watch?v=kCc8FmEb1nY&list=PPSV
-Objective : trying to make a decoder only transformer based LLM that can be trained using large set of data files
-Procedure : feeding in text files with human conversations / shakespeare writings and training our LLM to generate an output similar to the given input with the highest trainable accuracy possible
+- Objective : trying to make a decoder only transformer based LLM that can be trained using large set of data files
+- Procedure : feeding in text files with human conversations / shakespeare writings and training our LLM to generate an output similar to the given input with the highest trainable accuracy possible
 
