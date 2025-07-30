@@ -16,7 +16,7 @@
 
 
 4. Starting with Pytorch
-- learnt about tensor operations and matrices, pytorch nn modules and pytorch model optimizers
+- learnt about tensor operations and matrices, pytorch nn modules, model optimizers etc
 
 5. The Final Project
 - trying to make a decoder only transformer based LLM that can be trained using large set of data files
