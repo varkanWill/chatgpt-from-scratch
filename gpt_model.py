@@ -4,15 +4,18 @@ from torch.nn import functional as F
 torch.manual_seed(1337)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 batch_size = 64
-token_size = 16
-embeddings_count = 32
-max_iterations = 8000
+token_size = 256
+embeddings_count = 384
+dropout = 0.3
+max_iterations = 5000
 evaluation_interval = 500
 losses_eval_iterations = 200
-learning_rate = 1e-3
+learning_rate = 3e-4
+num_heads = 6
+num_layer = 8
 
 # recieving input
-with open('input_conversations.txt', 'r', encoding='utf-8') as open_text:
+with open('input2.txt', 'r', encoding='utf-8') as open_text:
     input_text = open_text.read()
 
 characters_list = sorted(list(set(input_text)))
@@ -59,9 +62,12 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size)
                                    for _ in range(heads_count)])
+        self.proj = nn.Linear(embeddings_count, embeddings_count)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.dropout(self.proj(out))
         return out
 
 
@@ -74,23 +80,23 @@ class Head(nn.Module):
         self.value = nn.Linear(embeddings_count, head_size, bias=False)
         self.register_buffer('tril', torch.tril(
             torch.ones(token_size, token_size)))
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        # input of size (batch, time-step, channels)
-        # output of size (batch, time-step, head size)
+
         B, T, C = x.shape
-        key_matrix = self.key(x)   # (B,T,hs)
-        query_matrix = self.query(x)  # (B,T,hs)
+        key_matrix = self.key(x)   # (B,T,head_size)
+        query_matrix = self.query(x)  # (B,T,head_size)
         # compute attention scores ("affinities")
-        # (B, T, hs) @ (B, hs, T) -> (B, T, T)
         affinity_matrix = query_matrix @ key_matrix.transpose(-2, -1) * \
             key_matrix.shape[-1]**-0.5
         affinity_matrix = affinity_matrix.masked_fill(
             self.tril[:T, :T] == 0, float('-inf'))  # (B, T, T)
         affinity_matrix = F.softmax(affinity_matrix, dim=-1)  # (B, T, T)
         # perform the weighted aggregation of the values
-        value_matrix = self.value(x)  # (B,T,hs)
-        # (B, T, T) @ (B, T, hs) -> (B, T, hs)
+        affinity_matrix = self.dropout(affinity_matrix)
+        value_matrix = self.value(x)  # (B,T,head_size)
+        # (B, T, T) @ (B, T, head_size) -> (B, T, head_size)
         out = affinity_matrix @ value_matrix
         return out
 
@@ -104,28 +110,44 @@ class FeedFoward(nn.Module):
             nn.ReLU(),
             nn.Linear(4 * n_embd, n_embd),
             # to add an activation function (relu) that is non linear for better training and optimization
+            nn.Dropout(dropout)
         )
 
     def forward(self, x):
         return self.feed_fwrd(x)
 
 
+class Block(nn.Module):
+
+    def __init__(self, num_embd, num_head):
+        super().__init__()
+        head_size = num_embd // num_head
+        self.selfAttention = MultiHeadAttention(num_head, head_size)
+        self.feedfrwd = FeedFoward(num_embd)
+        self.layernorm1 = nn.LayerNorm(num_embd)
+        self.layernorm2 = nn.LayerNorm(num_embd)
+
+    def forward(self, x):
+        x = x + self.selfAttention(self.layernorm1(x))
+        x = x + self.feedfrwd(self.layernorm2(x))
+        return x
+
+
 class GptModel(nn.Module):
 
     def __init__(self):
         super().__init__()
-        # makes 32 embeddings each of 65 characters
+        # makes 32 embeddings each of total number of characters
         self.token_embedding_table = nn.Embedding(
             chars_num, embeddings_count)
         # makes 32 embeddings for each token
         self.position_embedding_table = nn.Embedding(
             token_size, embeddings_count)
-        # # Linear layer to convert token embeddings (32) [inputs] to vocab_size (65)(output)
-        self.self_attention_head = MultiHeadAttention(
-            # head_count = 4, head dimensions = 8 (size of key query value matrix)
-            4, embeddings_count//4)
+        # Linear layer to convert token embeddings (32) [inputs] to vocab_size
         self.emb_convert = nn.Linear(embeddings_count, chars_num)
-        self.feed_forward = FeedFoward(embeddings_count)
+        self.layernorm_function = nn.LayerNorm(embeddings_count)
+        self.blocks = nn.Sequential(
+            *[Block(embeddings_count, num_head=num_heads) for _ in range(num_layer)])
 
     def forward(self, index, targets=None):
         # each token in each batch contains 65 logits, which when trained, predict the possibility of next character Ex- [0.04,0.01,0.45,0.01,.....] => here 3rd character has 45% prob of being next, 1st character has 4% prob of being next
@@ -136,8 +158,8 @@ class GptModel(nn.Module):
             torch.arange(T, device='cuda'))  # (T, embeddings count)
         # position_embeddings = (T, 32)
         net_token = token_embeddings + position_embeddings
-        net_token = self.self_attention_head(net_token)
-        net_token = self.feed_forward(net_token)
+        net_token = self.blocks(net_token)
+        net_token = self.layernorm_function(net_token)
         predictions = self.emb_convert(
             net_token)
         # predictions = (B,T, 65 = chars_num)
@@ -193,7 +215,7 @@ def estimate_loss():
 
 for i in range(max_iterations):
 
-    # every once in a while evaluate the loss on train and val sets
+    # every once in a while evaluate the loss on train and validation sets
     if i % evaluation_interval == 0:
         losses = estimate_loss()
         print(
@@ -211,4 +233,4 @@ for i in range(max_iterations):
 # generate from the model
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 print(decode_input(gpt_model.generate_new_tokens(
-    context, max_new_tokens=500)[0].tolist()))
+    context, max_new_tokens=8000)[0].tolist()))
